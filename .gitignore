@@ -1,0 +1,14 @@
+# R files
+.Rhistory
+.RData
+.Rproj.user/
+
+# System files
+.DS_Store
+
+# Backup folders
+docs_backup*/
+
+# Temp folders
+temp_*/
+docs_new/

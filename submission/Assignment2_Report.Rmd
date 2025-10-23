@@ -1,0 +1,349 @@
+---
+title: "BUSA2002 Ass2 – Macro & Construction Dashboard Snapshot"
+author: "NPT"
+date: "`r format(Sys.Date(), '%d %B %Y')`"
+output:
+  html_document:
+    toc: true
+    toc_depth: 2
+    number_sections: true
+    df_print: paged
+bibliography: references.bib
+csl: apa.csl
+nocite: |
+  @*
+link-citations: true
+editor_options:
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, fig.align = 'center')
+library(ggplot2)
+library(dplyr)
+library(readr)
+library(plotly)
+library(scales)
+```
+
+# Executive Summary
+
+Australia’s economy and construction industry evolved through three phases between 2020 and 2025: contraction during COVID‑19, a strong 2021 rebound, and moderation from 2023 as interest rates tightened. Engineering construction underpinned activity as residential building slowed. Public investment lifted the sector’s stability while private work softened. Our recommendation is to prioritise engineering opportunities, with Western Sydney Airport Metro the leading project.
+
+Key points:
+
+- GDP growth slowed in 2023 but remained positive into 2025.
+- Inflation peaked in 2022 and eased through 2024–2025 while services disinflation lagged.
+- Residential approvals weakened, while engineering workloads were supported by committed public projects.
+- Public share of construction rose from ~23% (2020) to ~29% (2024).
+
+# Introduction
+
+This report presents an overview of Australia’s macroeconomic and construction industry trends over the last 5 years, followed by recommendations for the next three years. Our focus is on how construction has contributed to the broader economy and explore the emerging opportunities ahead. The analysis draws on key indicators including GDP growth, inflation, the relationship between dwelling values and rents, total construction activity, sector trends (building vs engineering), the balance between public and private sector work, and industry turnover.
+
+# Data and Methods
+
+We compile ABS and RBA series (2020–2025) for macro indicators and construction statistics. Plots referenced here are the same series presented in the Shiny dashboard and can be regenerated with the helper functions used in the app code.
+
+```{r load_helpers}
+# Load the same helpers used by the dashboard and prepare data
+helper_path <- if (file.exists("busa_helpers.R")) "busa_helpers.R" else "../busa_helpers.R"
+source(helper_path)
+# Make data path robust whether Rmd lives beside a local data/ or uses parent data/
+data_dir <- if (dir.exists("data")) "data" else "../data"
+macro_df <- load_macro_indicators(data_dir)
+gdp_contrib <- load_gdp_contributions(data_dir)
+gdp_growth <- load_gdp_growth(data_dir)
+cpi_long <- load_cpi_goods_services(data_dir)
+dw_rents <- load_dwelling_vs_rents(data_dir)
+cwd_fy <- load_cwd_fy(data_dir)
+cwd <- load_cwd_quarterlies(data_dir)
+turnover_df <- load_turnover_indicator(data_dir)
+```
+
+# Macroeconomic Performance (2020–2025)
+
+## Real GDP Growth
+
+Household consumption and business spending drove the initial recovery in 2021 as mobility normalised and policy support such as JobKeeper preserved jobs. However, as interest rates rose from late 2022 onward, private demand slowed. Public demand helped stabilise activity through infrastructure programs. Education, travel, and commodities exports supported growth from late 2023 following reopening. The data indicates the 2023–2025 period saw slower but stable growth with normalising domestic demand.
+
+```{r fig-gdp-growth}
+df <- gdp_growth %>% filter(!is.na(date), date >= as.Date("2020-01-01"))
+ggplot(df, aes(x = date)) +
+  geom_col(aes(y = qoq_pct, fill = "Quarterly growth"), width = 25) +
+  geom_line(aes(y = tty_pct, color = "Through the year"), linewidth = 1.2) +
+  scale_fill_manual(values = c("Quarterly growth" = "#5DADE2"), name = NULL) +
+  scale_color_manual(values = c("Through the year" = "#154360"), name = NULL) +
+  labs(title = "Gross domestic product (chain volume, SA)", x = "Quarterly", y = "%") +
+  theme_minimal() + theme(legend.position = "bottom") +
+  scale_x_date(date_breaks = "6 months", date_labels = "%b-%y")
+```
+
+## Contributions to Growth
+
+Private demand led the early recovery. As rates rose from late 2022, private activity slowed, while public investment and net trade steadied growth. Construction cushioned the economy by transmitting policy and sustaining investment: public work offset the private slowdown, and engineering programs expanded productive capacity.
+
+The sector’s training focus helps convert vacancies into capability, supporting the infrastructure pipeline while keeping hiring aligned to demand. A $1 million spend in construction generates roughly $2.9–3.0 million in activity and around nine jobs. The industry employs about 1.3 million people and pays roughly $66 billion in annual wages.
+
+Higher borrowing costs reduced serviceability, pulling forward housing demand in 2021 and damping new dwelling and non-residential starts thereafter. Future momentum will depend on approvals and planning reform; housing policy will determine how quickly new supply eases affordability pressures.
+
+```{r fig-gdp-contri}
+df <- gdp_contrib %>% filter(!is.na(date), date >= as.Date("2020-01-01"))
+df_long <- df %>%
+  tidyr::pivot_longer(cols = c(private_demand, net_trade, public_demand),
+                      names_to = "component", values_to = "ppt") %>%
+  mutate(component = dplyr::recode(component,
+                                   private_demand = "Private demand",
+                                   net_trade = "Net trade",
+                                   public_demand = "Public demand"))
+ggplot() +
+  geom_col(data = df_long, aes(x = date, y = ppt, fill = component), width = 25) +
+  geom_line(data = df, aes(x = date, y = gdp_ppt, color = "GDP"), linewidth = 1.2) +
+  scale_fill_manual(values = c("Private demand" = "#899DBA",
+                               "Net trade" = "#F5B041",
+                               "Public demand" = "#C0392B"), name = NULL) +
+  scale_color_manual(values = c("GDP" = "#2E86AB"), name = NULL) +
+  labs(x = "Quarterly", y = "ppt") +
+  theme_minimal() + theme(legend.position = "bottom")
+```
+
+## Inflation
+
+```{r fig-inflation-cash}
+df <- macro_df %>% dplyr::filter(!is.na(date), date >= as.Date("2020-01-01")) %>%
+  dplyr::select(date, cpi_inflation, cash_rate) %>%
+  tidyr::pivot_longer(-date, names_to = "series", values_to = "value") %>%
+  dplyr::mutate(series = dplyr::recode(series,
+                                       cpi_inflation = "CPI Inflation",
+                                       cash_rate = "Cash Rate"))
+ggplot(df, aes(date, value, color = series)) +
+  geom_line(linewidth = 1) +
+  scale_color_manual(values = c("CPI Inflation" = "#f46d43", "Cash Rate" = "#1a9850"),
+                     breaks = c("CPI Inflation","Cash Rate"), name = NULL) +
+  scale_y_continuous(labels = scales::label_number(accuracy = 0.1)) +
+  labs(x = "Year", y = "%") +
+  theme_minimal() + theme(legend.position = "bottom")
+```
+
+```{r fig-cpi}
+df <- cpi_long %>% filter(!is.na(date), date >= as.Date("2020-01-01"))
+ggplot(df, aes(date, yoy_pct, color = component)) +
+  geom_line(linewidth = 1.1) +
+  scale_y_continuous(labels = label_number(accuracy = 0.1)) +
+  scale_color_manual(values = c("Goods" = "#2E86AB", "Services" = "#A93226"), name = NULL) +
+  labs(x = "Quarterly", y = "% YoY") +
+  theme_minimal() + theme(legend.position = "bottom")
+```
+Goods inflation fell back to normal levels quickly as supply bottlenecks eased. In contrast, services inflation has cooled more slowly, reflecting higher wage, rent, and insurance costs. The RBA and OECD expect inflation to return to the 2%–3% target range by 2025. However, ongoing rent increases could lift inflation further. If policy is loosened too early, services inflation may rise again, but keeping policy too tight could unnecessarily hold back interest-sensitive sectors.
+
+
+The RBA’s policy rate began at emergency lows of 0.25% in 2020 before rising to 2.85% by late 2022 and remaining at 4.35% through 2023 and 2024. Once inflation is within the target range, further rate cuts are expected. We observed effects of these policy changes through these channels:
+
+- Higher borrowing costs: Increased interest rates raised the cost of housing and business capital expenditure.
+- Income: Household consumption was reduced through lower disposable income.
+- Exchange rate advantage: Imported materials and equipment were cheaper due to a stronger Australian dollar relative to the US dollar.
+- Inflation expectations: Expectations and fears by businesses and employees were anchored through clear and credible monetary policy.
+
+```{r fig-building-approvals}
+ba_cy <- read.csv("../data/building_approvals_calendar_year.csv")
+ggplot(ba_cy, aes(x = year, y = dwellings_approved)) +
+  geom_line(linewidth = 1.2, color = "#1B9E77") +
+  geom_point(size = 3, color = "#1B9E77") +
+  labs(
+    title = "Dwellings Approved (Calendar Year)",
+    subtitle = "ABS 8731.0 (BA_SA2), AUS – monthly counts aggregated to year",
+    x = "Year", y = "Dwellings approved (count)"
+  ) +
+  theme_minimal() + theme(panel.grid.minor = element_blank(), legend.position = "none")
+```
+
+```{r fig-approvals-boxplot}
+# Building Approvals (Monthly box plot by calendar month 2021–2025)
+approvals_m <- load_building_approvals_monthly(data_dir) %>%
+  dplyr::mutate(year = lubridate::year(date)) %>%
+  dplyr::filter(year >= 2021, year <= 2025) %>%
+  dplyr::mutate(month_lab = factor(lubridate::month(date, label = TRUE, abbr = TRUE), levels = month.abb))
+ggplot(approvals_m, aes(x = month_lab, y = approvals)) +
+  geom_boxplot(outlier.alpha = 0.5, width = 0.7, fill = "#FFF3BF", color = "#000000") +
+  labs(title = "Building Approvals (Monthly box plot by calendar month 2021-2025)", x = "Month", y = "Approvals") +
+  theme_minimal()
+```
+
+The data shows dwelling approvals fell sharply from 2022, as seen in the figure above. At the same time, household consumption weakened as disposable incomes became scarce, and construction input costs remained elevated. This trend suggests that a stricter policy stance successfully dampened activity in interest-sensitive sectors. Consequently, residential construction was impacted the most.
+
+
+## Dwelling Value vs Rents
+
+Between 2022 and 2024, rent exceeded headline CPI due to low vacancy rates. New dwelling inflation fell from its peak but stayed above pre-pandemic levels. Non-discretionary costs reduced consumption, services input costs raised business expenses, and services inflation slowed the pace at which restrictive policy settings could be relaxed.
+
+```{r fig-dw-rents}
+dw <- dw_rents$dw %>% dplyr::filter(date >= as.Date("2020-01-01"))
+rt <- dw_rents$rents %>% dplyr::filter(date >= as.Date("2020-01-01"))
+merged <- dplyr::left_join(dw, rt, by = "date")
+max_left <- max(merged$dw_value_b, na.rm = TRUE)
+max_right <- max(merged$yoy_pct, na.rm = TRUE)
+scale_factor <- ifelse(is.finite(max_left / max_right), max_left / max_right, 1)
+ggplot(merged, aes(date)) +
+  geom_line(aes(y = dw_value_b, color = "Dwelling stock ($b)"), linewidth = 1.1) +
+  geom_line(aes(y = yoy_pct * scale_factor, color = "Rents YoY (%)"), linewidth = 1.1, linetype = "dashed") +
+  scale_y_continuous(name = "Total dwelling stock ($b)",
+                     sec.axis = sec_axis(~ ./scale_factor, name = "Rents YoY (%)")) +
+  scale_color_manual(values = c("Dwelling stock ($b)" = "#1F618D",
+                               "Rents YoY (%)" = "#A04000"), name = NULL) +
+  labs(x = "Year") + theme_minimal() + theme(legend.position = "bottom")
+```
+
+
+The data shows that dwelling approvals fell sharply from 2022, as seen in the figure above. At the same time, household consumption weakened as disposable incomes became scarce and construction input costs remained elevated. This trend suggests that a stricter policy stance successfully dampened activity in interest sensitive sectors. Consequently, residential construction was impacted the most.
+
+# Construction Industry Performance
+
+## Total Construction (FY)
+
+Total work done rose from about $252b in 2020 to $298b in 2024. Higher rates weighed on building, while the energy transition and transport programs supported engineering.
+
+```{r fig-total-cwd}
+df <- cwd_fy
+ggplot(df, aes(year, total_b)) +
+  geom_line(linewidth = 1.2, color = "#253494") +
+  geom_point(size = 2, color = "#253494") +
+  scale_y_continuous(labels = label_dollar(prefix = "$", suffix = "B", accuracy = 0.1)) +
+  labs(x = "Year", y = "AUD billions") + theme_minimal()
+```
+
+## Building vs Engineering (FY)
+
+Residential building rebounded in 2021 and plateaued from 2023 with tighter credit conditions. Engineering remained resilient on public pipelines. 
+
+```{r fig-sectors-fy}
+df <- cwd_fy %>% select(year, building_b, engineering_b) %>%
+  tidyr::pivot_longer(-year, names_to = "sector", values_to = "value_b") %>%
+  mutate(sector = dplyr::recode(sector, building_b = "Residential Building", engineering_b = "Engineering"))
+ggplot(df, aes(year, value_b, color = sector)) +
+  geom_line(linewidth = 1.2) + geom_point(size = 2) +
+  scale_y_continuous(labels = label_dollar(prefix = "$", suffix = "B", accuracy = 0.1)) +
+  labs(x = "Year", y = "AUD billions", color = NULL) +
+  theme_minimal() + theme(legend.position = "bottom")
+```
+
+
+As shown in the figure above, residential building rebounded in 2021, driven by fiscal stimulus and low rates, before losing momentum with rising interest rates in 2022. Non-residential building remained relatively steady. Over the same period, building rose from approximately $104bn to $143bn, while engineering increased from $149bn to $155bn.
+
+```{r fig-quarterly-lines}
+# Match dashboard Public vs Private Work Done (CVM) – quarterly
+pub_priv_q <- load_pub_priv_quarterly(data_dir)
+df_q <- pub_priv_q %>%
+  dplyr::select(date, public_m, private_m) %>%
+  tidyr::pivot_longer(-date, names_to = "owner", values_to = "value_m") %>%
+  dplyr::mutate(owner = dplyr::recode(owner, private_m = "Private", public_m = "Public"),
+                value_b = value_m / 1000)
+ggplot(df_q, aes(date, value_b, color = owner)) +
+  geom_line(linewidth = 1) +
+  scale_y_continuous(labels = scales::label_dollar(prefix = "$", suffix = "B", accuracy = 0.1)) +
+  labs(title = "Value of Construction Work Done", x = "Year", y = "AUD billions", color = NULL) +
+  theme_minimal() + theme(legend.position = "bottom") +
+  scale_x_date(date_breaks = "1 year", date_labels = "%Y")
+```
+
+As the RBA increased the cash rate from 0.10% to 4.35%, building activity plateaued and approvals declined. Higher borrowing costs and lower household incomes stalled building performance.
+
+Overall, total construction work rose by about $10bn between 2020 and 2025. Building drove early gains, engineering carried later momentum. Public work increased from $15bn to $22bn per quarter, while private ranged from $48bn to $55bn. Public investment helped stabilise construction as private building stalled.
+
+
+## Public vs Private
+```{r fig-pub-priv-pie}
+# FY composition for the latest FY in range (match dashboard pie)
+yr_sel <- max(cwd_fy$year, na.rm = TRUE)
+latest <- dplyr::filter(cwd_fy, year == yr_sel)
+if (nrow(latest) > 0) {
+  vals <- c(as.numeric(latest$public_share), as.numeric(100 - latest$public_share))
+  labs <- c("Public", "Private")
+  df_pie <- tibble::tibble(label = labs, share = vals)
+  ggplot(df_pie, aes(x = 1, y = share, fill = label)) +
+    geom_col(width = 1, color = "white") +
+    coord_polar(theta = "y") +
+    scale_fill_manual(values = c("Public" = "#2E86AB", "Private" = "#A23B72"), name = NULL) +
+    labs(title = paste0("Public vs Private Sector Construction (FY ", yr_sel, ")"), x = NULL, y = NULL) +
+    theme_void() + theme(legend.position = "bottom")
+}
+```
+
+Public share of total work lifted from roughly 23% (2020) to 29% (2024), stabilising aggregate activity as private building cooled.
+
+Larger contractors benefit most, as they are better equipped for large, multi-year, complex projects. Smaller firms may struggle to compete due to limited specialist manpower and often face stricter compliance requirements than in residential or commercial work.
+
+```{r fig-pub-priv}
+df <- cwd_fy %>% select(year, public_b, private_b) %>%
+  tidyr::pivot_longer(-year, names_to = "owner", values_to = "value_b") %>%
+  mutate(owner = dplyr::recode(owner, private_b = "Private", public_b = "Public"))
+ggplot(df, aes(year, value_b, color = owner)) +
+  geom_line(linewidth = 1.1) + geom_point(size = 2) +
+  scale_y_continuous(labels = label_dollar(prefix = "$", suffix = "B", accuracy = 0.1)) +
+  labs(x = "Year", y = "AUD billions", color = NULL) + theme_minimal() +
+  theme(legend.position = "bottom")
+```
+
+## Turnover
+
+Turnover trended higher with typical intra year seasonality (softer March, stronger June), consistent with project timing and financing cycles. Alongside low vacancy rates, the data indicates that demand remains present, with delivery paced by labour availability and easing input costs.
+
+```{r fig-mbti}
+df <- turnover_df
+min_pct <- min(df$pct_change_sa, na.rm = TRUE); max_pct <- max(df$pct_change_sa, na.rm = TRUE)
+min_idx <- min(c(df$idx_sa, df$idx_trend), na.rm = TRUE); max_idx <- max(c(df$idx_sa, df$idx_trend), na.rm = TRUE)
+k <- (max_idx - min_idx) / (max_pct - min_pct + 1e-9)
+df <- df %>% mutate(idx_sa_scaled = (idx_sa - min_idx)/k + min_pct,
+                    idx_tr_scaled = (idx_trend - min_idx)/k + min_pct)
+ggplot(df, aes(x = date)) +
+  geom_col(aes(y = pct_change_sa, fill = "Monthly % change"), width = 25, alpha = 0.8) +
+  geom_line(aes(y = idx_sa_scaled, color = "Index (SA)"), linewidth = 1.1) +
+  geom_line(aes(y = idx_tr_scaled, color = "Index (trend)"), linewidth = 1.1) +
+  scale_y_continuous(name = "%", sec.axis = sec_axis(~ (.-min_pct) * k + min_idx, name = "Index (Jul-2019=100)")) +
+  scale_color_manual(values = c("Index (SA)" = "#7FB3D5", "Index (trend)" = "#1F618D"), name = NULL) +
+  scale_fill_manual(values = c("Monthly % change" = "#F39C12"), name = NULL) +
+  labs(x = "Month") + theme_minimal() + theme(legend.position = "bottom")
+```
+
+
+
+
+# Opportunities (Next Three Years)
+
+Engineering presents the clearest growth pathway, supported by the national infrastructure pipeline and energy transmission upgrades. Non residential offers selective opportunities (health, education, advanced manufacturing), while residential remains interest sensitive but could benefit from targeted housing policy. We recommend the Western Sydney Airport Metro project.
+
+**Overview**
+
+A new metro line connecting St Marys to Western Sydney Airport and the Aerotropolis. This project aims to improve transport to the airport and support the development of the surrounding area.
+
+- **Value:** $11 billion, jointly funded by the Commonwealth and NSW Government  
+- **Scope:** 23 km of new metro line with six stations  
+- **Status:** Under construction; staged works to align with the airport opening
+
+**Opportunities**
+
+- **Rail Infrastructure:** Track laying, signalling, and electrification works  
+- **Station Construction:** Modern facilities with accessibility features  
+- **Bridge and Tunnel Works:** Grade separations and river crossings  
+- **Utilities Integration:** Power, water, and telecommunications infrastructure 
+
+# Conclusion
+
+Engineering construction is best placed to drive near term growth, with Western Sydney Airport Metro the preferred expansion opportunity. Public investment, energy transition projects, and normalising inflation support the sector’s outlook, while residential activity will depend on approvals and affordability.
+
+
+# Shiny Dashboard  Code (full)
+
+The dashboard code used for interactive exploration (Macro, GDP, Prices & Housing, Sector, Public vs Private, Labour & Turnover) is shown in full below from `app.R`.
+
+```{r shiny-full, echo=FALSE, results='asis'}
+app_path <- if (file.exists("app.R")) "app.R" else "../app.R"
+code <- readLines(app_path, warn = FALSE)
+cat("```r\n", paste(code, collapse = "\n"), "\n```\n", sep = "")
+```
+
+
+# References
+
+
+
+
